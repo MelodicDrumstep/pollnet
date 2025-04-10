@@ -259,7 +259,7 @@ Implementation workflow:
     }
 ```
 
-- Precompute checksums and prepare common UDP packet headers
+    - Precompute checksums and prepare common UDP packet headers
 
 ```cpp
     // Initialize UDP packet template
@@ -276,7 +276,7 @@ Implementation workflow:
     ipsum_cache += (ipsum_cache >> 16u);
 ```
 
-- Register DMA space and populate post address fields and pre-copy common headers into packets to reduce runtime overhead
+    - Register DMA space and populate post address fields and pre-copy common headers into packets to reduce runtime overhead
 
 ```cpp
     // Initialize all packet buffers with template
@@ -331,3 +331,16 @@ Implementation workflow:
         return rc == 0;
     }
 ```
+
+## Efvi TCP Client
+
+It's a clever design: the handler callback function is implemented in the `Client` class, which stores both a `efvitcp::TCPClient` object and a `TcpClient::Conn` object. The `poll` function looks like this:
+
+```cpp
+// Process network events
+void poll() {
+    client.poll(*this);
+}
+```
+
+So, now the `Client` class serves as the handler class!

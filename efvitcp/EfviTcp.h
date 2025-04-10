@@ -22,61 +22,72 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 */
 #pragma once
+
 #include <limits>
 #include "TcpClient.h"
 #include "TcpServer.h"
 
-// This is a wrapper class for pollnet interface
+// Wrapper class for an EfviTcpClient (TCP client with custom configurations)
 template<typename Conf>
 class EfviTcpClient
 {
+  // Configuration structure for the client
   struct ClientConf
   {
-    static const uint32_t ConnSendBufCnt = 1024;
-    static const bool SendBuf1K = true;
-    static const uint32_t ConnRecvBufSize = Conf::RecvBufSize;
-    static const uint32_t MaxConnCnt = 1;
-    static const uint32_t MaxTimeWaitConnCnt = 1;
-    static const uint32_t RecvBufCnt = 512;
-    static const uint32_t SynRetries = 3;
-    static const uint32_t TcpRetries = 10;
-    static const uint32_t DelayedAckMS = 10;
-    static const uint32_t MinRtoMS = 100;
-    static const uint32_t MaxRtoMS = 30 * 1000;
-    static const bool WindowScaleOption = false;
-    static const bool TimestampOption = false;
-    static const int CongestionControlAlgo = 0; // 0: no cwnd, 1: new reno, 2: cubic
-    static const uint32_t UserTimerCnt = 2;
+    // Define static configuration values used for the connection
+    static const uint32_t ConnSendBufCnt = 1024; // Send buffer count
+    static const bool SendBuf1K = true; // Whether to use 1KB send buffers
+    static const uint32_t ConnRecvBufSize = Conf::RecvBufSize; // Receive buffer size from configuration
+    static const uint32_t MaxConnCnt = 1; // Maximum number of connections
+    static const uint32_t MaxTimeWaitConnCnt = 1; // Maximum number of time-wait connections
+    static const uint32_t RecvBufCnt = 512; // Receive buffer count
+    static const uint32_t SynRetries = 3; // Number of retries for connection establishment
+    static const uint32_t TcpRetries = 10; // Number of TCP retries
+    static const uint32_t DelayedAckMS = 10; // Delayed acknowledgment time in milliseconds
+    static const uint32_t MinRtoMS = 100; // Minimum retransmission timeout in milliseconds
+    static const uint32_t MaxRtoMS = 30 * 1000; // Maximum retransmission timeout in milliseconds
+    static const bool WindowScaleOption = false; // Window scaling option (disabled)
+    static const bool TimestampOption = false; // Timestamp option (disabled)
+    static const int CongestionControlAlgo = 0; // Congestion control algorithm (0 = none)
+    static const uint32_t UserTimerCnt = 2; // Number of user timers
     struct UserData : public Conf::UserData
     {
-      const char* err_ = nullptr;
+      const char* err_ = nullptr; // Error message
     };
   };
+
   using TcpClient = efvitcp::TcpClient<ClientConf>;
   using TcpConn = typename TcpClient::Conn;
 
 public:
+  // Constructor: Initializes the EfviTcpClient object and establishes the connection
   EfviTcpClient()
     : conn(*(Conn*)&client.getConn()) {}
 
+  // Connection structure, inheriting from TcpConn
   struct Conn : public TcpConn
   {
+    // Check if the connection is established
     bool isConnected() { return this->isEstablished(); }
 
+    // Retrieve the last error message
     const char* getLastError() { return this->err_; };
 
+    // Close the connection with a reason
     void close(const char* reason) {
       this->err_ = reason;
       TcpConn::close();
     }
 
+    // Write data to the connection (blocking)
     int writeSome(const void* data, uint32_t size, bool more = false) {
       int ret = this->send(data, size, more);
       if (Conf::SendTimeoutSec) this->setUserTimer(0, Conf::SendTimeoutSec * 1000);
+      // If send timeout is enabled, statr the timer
       return ret;
     }
 
-    // blocking write is not supported currently
+    // Write data to the connection (non-blocking)
     bool writeNonblock(const void* data, uint32_t size, bool more = false) {
       if ((uint32_t)writeSome(data, size, more) != size) {
         close("send buffer full");
@@ -84,13 +95,15 @@ public:
       }
       return true;
     }
-
   };
 
+  // Retrieve the last error message from the connection
   const char* getLastError() { return conn.err_; };
 
+  // Check if the connection is established
   bool isConnected() { return conn.isEstablished(); }
 
+  // Initialize the client by setting interface, server IP, and server port
   bool init(const char* interface, const char* server_ip, uint16_t server_port,
             uint16_t local_port = 0) {
     if ((conn.err_ = client.init(interface))) return false;
@@ -100,16 +113,21 @@ public:
     return true;
   }
 
+  // Write some data to the connection
   int writeSome(const void* data, uint32_t size, bool more = false) { return conn.writeSome(data, size, more); }
 
+  // Write data non-blocking to the connection
   bool writeNonblock(const void* data, uint32_t size, bool more = false) {
     return conn.writeNonblock(data, size, more);
   }
 
+  // Close the connection with a reason
   void close(const char* reason) { conn.close(reason); }
 
+  // Allow reconnection attempts if the connection fails
   void allowReconnect() { next_conn_ts_ = 0; }
 
+  // Poll the client for events, passing a handler for processing the events
   template<typename Handler>
   void poll(Handler& handler, int64_t ns = 0) {
     if (conn.isClosed()) {
@@ -125,6 +143,7 @@ public:
       }
     }
 
+    // Temporary handler to handle TCP connection events
     struct TmpHandler
     {
       TmpHandler(Handler& h_, Conn& conn_)
@@ -174,60 +193,72 @@ public:
       Handler& handler;
       Conn& conn;
     } tmp_handler(handler, conn);
+
+    // Perform polling for the client
     client.poll(tmp_handler, ns);
   }
 
+  // Client instance used to handle the TCP connections
   TcpClient client;
-  std::string server_ip_;
-  uint16_t server_port_;
-  uint16_t local_port_;
-  Conn& conn;
-  int64_t next_conn_ts_ = 0;
+  std::string server_ip_; // Server IP address
+  uint16_t server_port_; // Server port
+  uint16_t local_port_; // Local port for the connection
+  Conn& conn; // Reference to the current connection
+  int64_t next_conn_ts_ = 0; // Next connection retry timestamp
 };
 
+// Wrapper class for an EfviTcpServer (TCP server with custom configurations)
 template<typename Conf>
 class EfviTcpServer
 {
+  // Configuration structure for the server
   struct ServerConf
   {
-    static const uint32_t ConnSendBufCnt = 1024;
-    static const bool SendBuf1K = true;
-    static const uint32_t ConnRecvBufSize = Conf::RecvBufSize;
-    static const uint32_t MaxConnCnt = Conf::MaxConns;
-    static const uint32_t MaxTimeWaitConnCnt = Conf::MaxConns;
-    static const uint32_t RecvBufCnt = 512;
-    static const uint32_t SynRetries = 3;
-    static const uint32_t TcpRetries = 10;
-    static const uint32_t DelayedAckMS = 10;
-    static const uint32_t MinRtoMS = 100;
-    static const uint32_t MaxRtoMS = 30 * 1000;
-    static const bool WindowScaleOption = false;
-    static const bool TimestampOption = false;
-    static const int CongestionControlAlgo = 0; // 0: no cwnd, 1: new reno, 2: cubic
-    static const uint32_t UserTimerCnt = 2;
+    // Static configuration values for the server
+    static const uint32_t ConnSendBufCnt = 1024; // Send buffer count
+    static const bool SendBuf1K = true; // Whether to use 1KB send buffers
+    static const uint32_t ConnRecvBufSize = Conf::RecvBufSize; // Receive buffer size from configuration
+    static const uint32_t MaxConnCnt = Conf::MaxConns; // Max number of allowed connections
+    static const uint32_t MaxTimeWaitConnCnt = Conf::MaxConns; // Max number of time-wait connections
+    static const uint32_t RecvBufCnt = 512; // Receive buffer count
+    static const uint32_t SynRetries = 3; // Number of retries for connection establishment
+    static const uint32_t TcpRetries = 10; // Number of TCP retries
+    static const uint32_t DelayedAckMS = 10; // Delayed acknowledgment time in milliseconds
+    static const uint32_t MinRtoMS = 100; // Minimum retransmission timeout in milliseconds
+    static const uint32_t MaxRtoMS = 30 * 1000; // Maximum retransmission timeout in milliseconds
+    static const bool WindowScaleOption = false; // Window scaling option (disabled)
+    static const bool TimestampOption = false; // Timestamp option (disabled)
+    static const int CongestionControlAlgo = 0; // Congestion control algorithm (0 = none)
+    static const uint32_t UserTimerCnt = 2; // Number of user timers
     struct UserData : public Conf::UserData
     {
-      const char* err_ = nullptr;
+      const char* err_ = nullptr; // Error message
     };
   };
+
+  // Define aliases for TcpServer and TcpConn using ServerConf
   using TcpServer = efvitcp::TcpServer<ServerConf>;
   using TcpConn = typename TcpServer::Conn;
 
 public:
   EfviTcpServer() {}
 
+  // Connection structure, inheriting from TcpConn
   struct Conn : public TcpConn
   {
+    // Check if the connection is established
     bool isConnected() { return this->isEstablished(); }
 
+    // Retrieve the last error message
     const char* getLastError() { return this->err_; };
 
+    // Close the connection with a reason
     void close(const char* reason) {
       this->err_ = reason;
       TcpConn::close();
     }
 
-    // blocking write is not supported currently
+    // Write data to the connection (non-blocking)
     bool writeNonblock(const void* data, uint32_t size, bool more = false) {
       if (this->send(data, size, more) != size) {
         close("send buffer full");
@@ -238,76 +269,43 @@ public:
     }
   };
 
+  // Retrieve the last error message
   const char* getLastError() { return err_; };
 
+  // Initialize the server by setting interface, server IP, and server port
   bool init(const char* interface, const char* server_ip, uint16_t server_port) {
     if ((err_ = server_.init(interface))) return false;
     if ((err_ = server_.listen(server_port))) return false;
     return true;
   }
 
+  // Close the server with a reason
   void close(const char* reason) {
     if (reason) err_ = reason;
     server_.close();
   }
 
+  // Check if the server is closed
   bool isClosed() { return err_; }
 
+  // Get the current connection count
   uint32_t getConnCnt() { return server_.getConnCnt(); }
 
+  // Iterate through each connection and apply a handler
   template<typename Handler>
   void foreachConn(Handler handler) {
-    server_.foreachConn([&](TcpConn& conn) { handler(*(Conn*)&conn); });
+    server_.foreachConn([&](TcpConn& conn) {
+      handler(static_cast<Conn&>(conn));
+    });
   }
 
+  // Poll the server for events, passing a handler for processing the events
   template<typename Handler>
-  void poll(Handler& handler, int64_t ns = 0) {
-    struct TmpHandler
-    {
-      TmpHandler(Handler& h_)
-        : handler(h_) {}
-
-      bool allowNewConnection(uint32_t ip, uint16_t port_be) { return true; }
-      void onConnectionReset(TcpConn& conn) {
-        conn.err_ = "connection reset";
-        handler.onTcpDisconnect(*(Conn*)&conn);
-      }
-      void onConnectionTimeout(TcpConn& conn) {
-        conn.err_ = "connection timeout";
-        if (conn.isEstablished()) handler.onTcpDisconnect(*(Conn*)&conn);
-      }
-      void onConnectionClosed(TcpConn& conn) {
-        conn.err_ = "connection closed";
-        handler.onTcpDisconnect(*(Conn*)&conn);
-      }
-      void onFin(TcpConn& conn, uint8_t* data, uint32_t size) {
-        Conn& c = *(Conn*)&conn;
-        if (size) handler.onTcpData(c, data, size);
-        c.close("remote close");
-        handler.onTcpDisconnect(c);
-      }
-      void onMoreSendable(TcpConn&) {}
-      void onUserTimeout(TcpConn& conn, uint32_t timer_id) {
-        if (timer_id == 0)
-          handler.onSendTimeout(*(Conn*)&conn);
-        else
-          handler.onRecvTimeout(*(Conn*)&conn);
-      }
-      void onConnectionEstablished(TcpConn& conn) {
-        if (Conf::SendTimeoutSec) conn.setUserTimer(0, Conf::SendTimeoutSec * 1000);
-        if (Conf::RecvTimeoutSec) conn.setUserTimer(1, Conf::RecvTimeoutSec * 1000);
-        handler.onTcpConnected(*(Conn*)&conn);
-      }
-      uint32_t onData(TcpConn& conn, const uint8_t* data, uint32_t size) {
-        if (Conf::RecvTimeoutSec) conn.setUserTimer(1, Conf::RecvTimeoutSec * 1000);
-        return handler.onTcpData(*(Conn*)&conn, data, size);
-      }
-
-      Handler& handler;
-    } tmp_handler(handler);
-    server_.poll(tmp_handler, ns);
+  void poll(Handler& handler) {
+    server_.poll(handler);
   }
 
-  const char* err_ = "Closed";
+  // Server instance used to handle the TCP connections
   TcpServer server_;
+  const char* err_ = nullptr; // Error message
 };
